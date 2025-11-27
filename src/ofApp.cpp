@@ -2,6 +2,9 @@
 
 //--------------------------------------------------------------
 void ofApp::setup() {
+    // Set window size explicitly
+    ofSetWindowShape(1280, 720);
+
     ofSetFrameRate(60);
     ofBackground(0);
     ofEnableAlphaBlending();
@@ -50,6 +53,29 @@ void ofApp::setup() {
         }
         targetImg.update();
     }
+
+    // Resize image to fit window while maintaining aspect ratio
+    float windowW = ofGetWidth();
+    float windowH = ofGetHeight();
+    float imgW = targetImg.getWidth();
+    float imgH = targetImg.getHeight();
+
+    // Calculate scale to fit image in window (with some margin)
+    float margin = 50;
+    float availableW = windowW - margin * 2;
+    float availableH = windowH - margin * 2;
+
+    float scaleX = availableW / imgW;
+    float scaleY = availableH / imgH;
+    float scale = min(scaleX, scaleY);
+
+    int newW = imgW * scale;
+    int newH = imgH * scale;
+
+    targetImg.resize(newW, newH);
+
+    ofLog() << "Image loaded and resized to: " << newW << "x" << newH;
+    ofLog() << "Window size: " << windowW << "x" << windowH;
 
     // Initialize particles from image
     initParticlesFromImage();
@@ -351,6 +377,8 @@ void ofApp::draw() {
     info += "Mode: " + ofToString(mode + 1) + " - " + modeNames[mode] + "\n";
     info += "Active Particles: " + ofToString(mesh.getNumVertices()) + " / " + ofToString(targetParticleCount) + "\n";
     info += "Audio Level: " + ofToString(scaledVol, 2) + "\n";
+    info += "Image Size: " + ofToString(targetImg.getWidth()) + "x" + ofToString(targetImg.getHeight()) + "\n";
+    info += "Window Size: " + ofToString(ofGetWidth()) + "x" + ofToString(ofGetHeight()) + "\n";
     info += "\n";
     info += "Controls:\n";
     info += "1-4: Switch Mode\n";
