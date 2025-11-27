@@ -1,0 +1,60 @@
+# openFrameworks gitignore
+
+# Build files
+bin/
+obj/
+*.o
+*.a
+*.dll
+*.exe
+*.app
+
+# IDE files
+.vs/
+.vscode/
+*.sln
+*.suo
+*.vcxproj*
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Keep bin/data folder but ignore its contents except .gitkeep
+bin/**/*
+!bin/data/
+!bin/data/.gitkeep
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Debug files
+*.dSYM/
