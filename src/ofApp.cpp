@@ -18,6 +18,16 @@ void ofApp::setup() {
     isMousePressed = false;
     stride = 2;  // Sample every 2 pixels (tunable for performance)
 
+    // Auto-sequence
+    autoSequenceMode = false;
+    sequenceStartTime = 0;
+    currentSequencePhase = 0;
+
+    // Audio analysis
+    bass = mid = treble = beat = 0.0;
+    lastBeatTime = 0;
+    fftSmoothed.resize(FFT_SIZE / 2, 0.0);
+
     // Setup Audio Input
     ofSoundStreamSettings settings;
     auto devices = soundStream.getMatchingDevices("default");
@@ -88,6 +98,9 @@ void ofApp::setup() {
     glEnable(GL_POINT_SMOOTH);
     glPointSize(2.0);
 
+    // Initialize bird formations
+    initBirdFormations();
+
     ofLog() << "Setup complete. Total particles: " << particles.size();
 }
 
@@ -143,8 +156,16 @@ void ofApp::initParticlesFromImage() {
 
 //--------------------------------------------------------------
 void ofApp::update() {
+    // Analyze audio (FFT, beat detection)
+    analyzeAudio();
+
     // Smooth the volume
     scaledVol = ofClamp(smoothedVol * 3.0, 0.0, 1.0);
+
+    // Update auto-sequence if enabled
+    if (autoSequenceMode) {
+        updateAutoSequence();
+    }
 
     // Spawn particles if mouse is pressed (for testing/interaction)
     if (isMousePressed) {
@@ -174,6 +195,9 @@ void ofApp::updateParticles() {
             break;
         case 3:
             updateMode3_Reconstruct();
+            break;
+        case 4:
+            updateMode4_BirdFormation();
             break;
     }
 }
@@ -336,6 +360,62 @@ void ofApp::updateMode3_Reconstruct() {
 }
 
 //--------------------------------------------------------------
+// Mode 4: Bird Formation - Particles form flying bird shapes
+//--------------------------------------------------------------
+void ofApp::updateMode4_BirdFormation() {
+    float time = ofGetElapsedTimef();
+
+    // Update bird flock positions and wing flapping
+    for (int i = 0; i < birdFlocks.size(); i++) {
+        auto& bird = birdFlocks[i];
+
+        // Move bird across screen
+        bird.center += bird.velocity * (1.0 + bass * 0.5);  // Bass affects flight speed
+
+        // Wing flapping (affected by beat)
+        bird.wingPhase += 0.1 + beat * 0.3;
+
+        // Wrap around screen
+        if (bird.center.x < -200) bird.center.x = ofGetWidth() + 200;
+        if (bird.center.x > ofGetWidth() + 200) bird.center.x = -200;
+        if (bird.center.y < -200) bird.center.y = ofGetHeight() + 200;
+        if (bird.center.y > ofGetHeight() + 200) bird.center.y = -200;
+
+        // Gentle wave motion (up and down)
+        float wave = sin(time * 0.5 + i) * 30.0;
+        bird.center.y += wave * 0.01;
+
+        // Regenerate bird shape with current wing phase
+        generateBirdShape(i);
+    }
+
+    // Move particles towards their bird positions
+    for (auto& p : particles) {
+        if (!p.isActive) continue;
+
+        // Seek bird position with easing
+        glm::vec3 toBird = p.birdPos - p.pos;
+        float dist = glm::length(toBird);
+
+        // Easing factor (tunable)
+        float easing = 0.08;
+
+        // Apply seeking force
+        p.vel += toBird * easing;
+
+        // Apply friction
+        p.vel *= 0.88;
+
+        p.pos += p.vel;
+
+        // Add slight turbulence for organic feel
+        float turbulence = 0.3;
+        p.pos.x += ofNoise(p.uniqueVal, time) * turbulence - turbulence * 0.5;
+        p.pos.y += ofNoise(p.uniqueVal + 100, time) * turbulence - turbulence * 0.5;
+    }
+}
+
+//--------------------------------------------------------------
 void ofApp::updateMesh() {
     mesh.clear();
 
@@ -371,19 +451,31 @@ void ofApp::draw() {
 
     // Draw debug info
     ofSetColor(255);
-    string modeNames[] = {"Gathering", "Pulse", "Organism", "Reconstruct"};
+    string modeNames[] = {"Gathering", "Pulse", "Organism", "Reconstruct", "Bird Formation"};
     string info = "";
     info += "FPS: " + ofToString(ofGetFrameRate(), 1) + "\n";
     info += "Mode: " + ofToString(mode + 1) + " - " + modeNames[mode] + "\n";
+
+    if (autoSequenceMode) {
+        float elapsed = ofGetElapsedTimef() - sequenceStartTime;
+        info += "AUTO-SEQUENCE: Phase " + ofToString(currentSequencePhase) + " (" + ofToString(elapsed, 1) + "s)\n";
+    }
+
     info += "Active Particles: " + ofToString(mesh.getNumVertices()) + " / " + ofToString(targetParticleCount) + "\n";
-    info += "Audio Level: " + ofToString(scaledVol, 2) + "\n";
-    info += "Image Size: " + ofToString(targetImg.getWidth()) + "x" + ofToString(targetImg.getHeight()) + "\n";
-    info += "Window Size: " + ofToString(ofGetWidth()) + "x" + ofToString(ofGetHeight()) + "\n";
+    info += "Audio - Volume: " + ofToString(scaledVol, 2);
+    info += " | Bass: " + ofToString(bass, 2);
+    info += " | Mid: " + ofToString(mid, 2);
+    info += " | Treble: " + ofToString(treble, 2) + "\n";
+    info += "Beat: " + ofToString(beat, 2) + "\n";
+    info += "Image: " + ofToString(targetImg.getWidth()) + "x" + ofToString(targetImg.getHeight()) + " | ";
+    info += "Window: " + ofToString(ofGetWidth()) + "x" + ofToString(ofGetHeight()) + "\n";
     info += "\n";
     info += "Controls:\n";
-    info += "1-4: Switch Mode\n";
+    info += "1-5: Switch Mode (1=Gathering, 2=Pulse, 3=Organism, 4=Reconstruct, 5=Birds)\n";
+    info += "6: Start Auto-Sequence (60s loop)\n";
+    info += "S: Stop Auto-Sequence\n";
     info += "R: Reset Particles\n";
-    info += "Mouse Click: Spawn Particles";
+    info += "Mouse: Spawn Particles";
 
     ofDrawBitmapString(info, 20, 20);
 }
@@ -443,7 +535,221 @@ glm::vec3 ofApp::getCurlNoise(glm::vec3 p, float t) {
 }
 
 //--------------------------------------------------------------
+// Initialize bird formations
+//--------------------------------------------------------------
+void ofApp::initBirdFormations() {
+    birdFlocks.clear();
+
+    // Create NUM_BIRDS bird flocks at different positions
+    for (int i = 0; i < NUM_BIRDS; i++) {
+        BirdFlock bird;
+
+        // Random starting position
+        bird.center = glm::vec3(
+            ofRandom(200, ofGetWidth() - 200),
+            ofRandom(100, ofGetHeight() / 2),  // Upper half of screen
+            ofRandom(-50, 50)
+        );
+
+        // Random velocity (mostly horizontal)
+        float angle = ofRandom(-PI / 6, PI / 6);  // Slight angle variation
+        float speed = ofRandom(1.0, 2.5);
+        bird.velocity = glm::vec3(cos(angle) * speed, sin(angle) * speed, 0);
+
+        bird.wingPhase = ofRandom(TWO_PI);
+        bird.size = ofRandom(80, 150);  // Size variation
+
+        birdFlocks.push_back(bird);
+    }
+
+    // Assign particles to bird groups
+    generateBirdShape(0);  // Initial generation
+}
+
+//--------------------------------------------------------------
+// Generate bird silhouette shape mathematically
+//--------------------------------------------------------------
+void ofApp::generateBirdShape(int birdIndex) {
+    if (birdIndex >= birdFlocks.size()) return;
+
+    const auto& bird = birdFlocks[birdIndex];
+
+    // Calculate particles per bird
+    int particlesPerBird = particles.size() / NUM_BIRDS;
+    int startIdx = birdIndex * particlesPerBird;
+    int endIdx = (birdIndex == NUM_BIRDS - 1) ? particles.size() : (birdIndex + 1) * particlesPerBird;
+
+    // V-shaped bird silhouette (simplified)
+    int count = 0;
+    for (int i = startIdx; i < endIdx; i++) {
+        auto& p = particles[i];
+        p.birdGroup = birdIndex;
+
+        // Create V-shape using parametric equations
+        float t = (float)(i - startIdx) / (endIdx - startIdx);  // 0 to 1
+
+        // Wing flapping amplitude
+        float wingFlap = sin(bird.wingPhase) * 15.0;
+
+        float x, y;
+
+        if (t < 0.05) {
+            // Head (small cluster)
+            x = 0;
+            y = 0;
+        } else if (t < 0.5) {
+            // Left wing
+            float wingT = (t - 0.05) / 0.45;
+            x = -wingT * bird.size;
+            y = wingT * bird.size * 0.7 + wingFlap * wingT;
+        } else {
+            // Right wing
+            float wingT = (t - 0.5) / 0.5;
+            x = wingT * bird.size;
+            y = wingT * bird.size * 0.7 + wingFlap * wingT;
+        }
+
+        // Add body thickness
+        float bodyThickness = ofRandom(-5, 5);
+        x += bodyThickness;
+
+        // Apply to particle's bird position
+        p.birdPos = bird.center + glm::vec3(x, y, 0);
+
+        // Color variation (slightly lighter for sky creatures)
+        float brightness = ofMap(t, 0, 1, 0.8, 1.2);
+        p.color.r = ofClamp(p.color.r * brightness, 0, 1);
+        p.color.g = ofClamp(p.color.g * brightness, 0, 1);
+        p.color.b = ofClamp(p.color.b * brightness, 0, 1);
+
+        count++;
+    }
+}
+
+//--------------------------------------------------------------
+// Auto-sequence system - automatic mode transitions
+//--------------------------------------------------------------
+void ofApp::startAutoSequence() {
+    autoSequenceMode = true;
+    sequenceStartTime = ofGetElapsedTimef();
+    currentSequencePhase = 0;
+    mode = 0;
+    ofLog() << "Auto-sequence started";
+}
+
+void ofApp::updateAutoSequence() {
+    float elapsed = ofGetElapsedTimef() - sequenceStartTime;
+
+    // Sequence timing (in seconds) - tunable
+    float phase0End = 10;   // 0-10s: Gathering
+    float phase1End = 20;   // 10-20s: Pulse
+    float phase2End = 35;   // 20-35s: Bird Formation
+    float phase3End = 45;   // 35-45s: Organism
+    float phase4End = 60;   // 45-60s: Reconstruct
+
+    if (elapsed < phase0End && mode != 0) {
+        mode = 0;
+        currentSequencePhase = 0;
+        ofLog() << "Auto-sequence: Phase 0 - Gathering";
+    } else if (elapsed >= phase0End && elapsed < phase1End && mode != 1) {
+        mode = 1;
+        currentSequencePhase = 1;
+        ofLog() << "Auto-sequence: Phase 1 - Pulse";
+    } else if (elapsed >= phase1End && elapsed < phase2End && mode != 4) {
+        mode = 4;
+        currentSequencePhase = 2;
+        ofLog() << "Auto-sequence: Phase 2 - Bird Formation";
+    } else if (elapsed >= phase2End && elapsed < phase3End && mode != 2) {
+        mode = 2;
+        currentSequencePhase = 3;
+        ofLog() << "Auto-sequence: Phase 3 - Organism (Dispersion)";
+    } else if (elapsed >= phase3End && elapsed < phase4End && mode != 3) {
+        mode = 3;
+        currentSequencePhase = 4;
+        ofLog() << "Auto-sequence: Phase 4 - Reconstruct";
+    } else if (elapsed >= phase4End) {
+        // Loop or stop
+        autoSequenceMode = false;
+        ofLog() << "Auto-sequence completed";
+    }
+}
+
+//--------------------------------------------------------------
+// Audio analysis with FFT
+//--------------------------------------------------------------
+void ofApp::analyzeAudio() {
+    if (lastBuffer.size() == 0) return;
+
+    // Perform simple FFT using ofSoundBuffer
+    // Note: openFrameworks doesn't have built-in FFT, so we'll use a simplified approach
+    // For full FFT, you'd typically use ofxFft addon, but we're avoiding addons
+
+    // Simple frequency band analysis using time-domain approximation
+    int numFrames = lastBuffer.getNumFrames();
+    if (numFrames == 0) return;
+
+    float lowSum = 0, midSum = 0, highSum = 0;
+    int lowCount = 0, midCount = 0, highCount = 0;
+
+    // Divide buffer into frequency-like bands (approximation)
+    for (int i = 0; i < numFrames; i++) {
+        float sample = abs(lastBuffer[i * lastBuffer.getNumChannels()]);
+
+        // Low frequencies (first third)
+        if (i < numFrames / 3) {
+            lowSum += sample;
+            lowCount++;
+        }
+        // Mid frequencies (second third)
+        else if (i < numFrames * 2 / 3) {
+            midSum += sample;
+            midCount++;
+        }
+        // High frequencies (last third)
+        else {
+            highSum += sample;
+            highCount++;
+        }
+    }
+
+    // Average and smooth
+    float newBass = (lowCount > 0) ? lowSum / lowCount : 0;
+    float newMid = (midCount > 0) ? midSum / midCount : 0;
+    float newTreble = (highCount > 0) ? highSum / highCount : 0;
+
+    bass = bass * 0.8 + newBass * 0.2;
+    mid = mid * 0.8 + newMid * 0.2;
+    treble = treble * 0.8 + newTreble * 0.2;
+
+    // Detect beat
+    detectBeat();
+}
+
+//--------------------------------------------------------------
+// Simple beat detection
+//--------------------------------------------------------------
+void ofApp::detectBeat() {
+    float currentTime = ofGetElapsedTimef();
+
+    // Beat threshold (tunable)
+    float beatThreshold = 0.3;
+    float minBeatInterval = 0.2;  // Minimum 200ms between beats
+
+    // Detect sudden increase in bass
+    if (bass > beatThreshold && (currentTime - lastBeatTime) > minBeatInterval) {
+        beat = 1.0;
+        lastBeatTime = currentTime;
+    } else {
+        // Decay beat intensity
+        beat *= 0.9;
+    }
+}
+
+//--------------------------------------------------------------
 void ofApp::audioIn(ofSoundBuffer & input) {
+    // Store buffer for analysis
+    lastBuffer = input;
+
     // Calculate RMS (Root Mean Square) volume
     float sum = 0.0;
     for (size_t i = 0; i < input.getNumFrames(); i++) {
@@ -462,24 +768,42 @@ void ofApp::keyPressed(int key) {
     switch (key) {
         case '1':
             mode = 0;
+            autoSequenceMode = false;
             ofLog() << "Mode: 0 - Gathering";
             break;
         case '2':
             mode = 1;
+            autoSequenceMode = false;
             ofLog() << "Mode: 1 - Pulse";
             break;
         case '3':
             mode = 2;
+            autoSequenceMode = false;
             ofLog() << "Mode: 2 - Organism";
             break;
         case '4':
             mode = 3;
+            autoSequenceMode = false;
             ofLog() << "Mode: 3 - Reconstruct";
+            break;
+        case '5':
+            mode = 4;
+            autoSequenceMode = false;
+            ofLog() << "Mode: 4 - Bird Formation";
+            break;
+        case '6':
+            startAutoSequence();
             break;
         case 'r':
         case 'R':
             resetParticles();
             ofLog() << "Particles reset";
+            break;
+        case 's':
+        case 'S':
+            // Stop auto-sequence
+            autoSequenceMode = false;
+            ofLog() << "Auto-sequence stopped";
             break;
     }
 }
