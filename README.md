@@ -135,7 +135,7 @@ You can adjust these parameters in the code:
   - Frequency band separation (Bass/Mid/Treble) ✨NEW
   - Beat detection with configurable threshold ✨NEW
 - **Particle count:** ~30,000 (adjustable via stride parameter)
-- **Bird Formation:** Mathematical V-shape generation with wing flapping animation ✨NEW
+- **Bird Formation:** Programmatic bird silhouette with realistic shape, rotation, and wing flapping ✨NEW
 - **Auto-Sequence:** Time-based mode transitions with 5 distinct phases ✨NEW
 - **Performance:** 60 FPS on modern hardware
 - **Additive blending** for glowing particle effect

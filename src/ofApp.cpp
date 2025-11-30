@@ -98,6 +98,9 @@ void ofApp::setup() {
     glEnable(GL_POINT_SMOOTH);
     glPointSize(2.0);
 
+    // Create bird silhouette image
+    createBirdSilhouette();
+
     // Initialize bird formations
     initBirdFormations();
 
@@ -535,6 +538,109 @@ glm::vec3 ofApp::getCurlNoise(glm::vec3 p, float t) {
 }
 
 //--------------------------------------------------------------
+// Create bird silhouette image programmatically
+//--------------------------------------------------------------
+void ofApp::createBirdSilhouette() {
+    int w = 200;
+    int h = 150;
+    birdSilhouette.allocate(w, h, OF_IMAGE_GRAYSCALE);
+
+    // Clear to black (transparent)
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            birdSilhouette.setColor(x, y, ofColor(0));
+        }
+    }
+
+    // Draw a flying bird silhouette (side view)
+    // Center of image
+    int cx = w / 2;
+    int cy = h / 2;
+
+    // Body (ellipse)
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            float dx = x - cx;
+            float dy = y - cy;
+
+            // Main body ellipse
+            float bodyEllipse = (dx * dx) / (30.0 * 30.0) + (dy * dy) / (15.0 * 15.0);
+            if (bodyEllipse < 1.0) {
+                birdSilhouette.setColor(x, y, ofColor(255));
+            }
+
+            // Head (small circle)
+            float headX = cx + 35;
+            float headY = cy - 5;
+            float headDist = sqrt((x - headX) * (x - headX) + (y - headY) * (y - headY));
+            if (headDist < 12) {
+                birdSilhouette.setColor(x, y, ofColor(255));
+            }
+
+            // Beak (triangle)
+            if (x > headX + 8 && x < headX + 18 &&
+                abs(y - headY) < (x - headX - 8) * 0.3) {
+                birdSilhouette.setColor(x, y, ofColor(255));
+            }
+        }
+    }
+
+    // Wings (curved shapes) - using bezier-like curves
+    // Left wing (upper)
+    for (int i = 0; i < 60; i++) {
+        float t = i / 60.0;
+        int wx = cx - 10 - t * 70;
+        int wy = cy - 20 - sin(t * PI) * 40;
+
+        // Draw thick line for wing
+        for (int thickness = -8; thickness <= 8; thickness++) {
+            int py = wy + thickness;
+            if (py >= 0 && py < h && wx >= 0 && wx < w) {
+                birdSilhouette.setColor(wx, py, ofColor(255));
+            }
+        }
+    }
+
+    // Right wing (lower, partially behind body)
+    for (int i = 0; i < 50; i++) {
+        float t = i / 50.0;
+        int wx = cx - 10 - t * 50;
+        int wy = cy + 10 + sin(t * PI) * 30;
+
+        // Draw thick line for wing
+        for (int thickness = -6; thickness <= 6; thickness++) {
+            int py = wy + thickness;
+            if (py >= 0 && py < h && wx >= 0 && wx < w) {
+                // Only draw if not covered by body
+                ofColor current = birdSilhouette.getColor(wx, py);
+                if (current.r == 0) {
+                    birdSilhouette.setColor(wx, py, ofColor(180));  // Slightly darker
+                }
+            }
+        }
+    }
+
+    // Tail feathers
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 30; j++) {
+            float t = j / 30.0;
+            int tx = cx - 30 - t * 25;
+            int ty = cy + (i - 1) * 12 + sin(t * PI) * 5;
+
+            for (int thickness = -3; thickness <= 3; thickness++) {
+                int py = ty + thickness;
+                if (py >= 0 && py < h && tx >= 0 && tx < w) {
+                    birdSilhouette.setColor(tx, py, ofColor(255));
+                }
+            }
+        }
+    }
+
+    birdSilhouette.update();
+    ofLog() << "Bird silhouette created: " << w << "x" << h;
+}
+
+//--------------------------------------------------------------
 // Initialize bird formations
 //--------------------------------------------------------------
 void ofApp::initBirdFormations() {
@@ -557,7 +663,8 @@ void ofApp::initBirdFormations() {
         bird.velocity = glm::vec3(cos(angle) * speed, sin(angle) * speed, 0);
 
         bird.wingPhase = ofRandom(TWO_PI);
-        bird.size = ofRandom(80, 150);  // Size variation
+        bird.size = ofRandom(0.6, 1.2);  // Scale variation (relative to original size)
+        bird.rotation = 0;  // Rotation will be calculated from velocity
 
         birdFlocks.push_back(bird);
     }
@@ -567,62 +674,71 @@ void ofApp::initBirdFormations() {
 }
 
 //--------------------------------------------------------------
-// Generate bird silhouette shape mathematically
+// Generate bird silhouette from image
 //--------------------------------------------------------------
 void ofApp::generateBirdShape(int birdIndex) {
     if (birdIndex >= birdFlocks.size()) return;
+    if (birdSilhouette.getWidth() == 0) return;
 
-    const auto& bird = birdFlocks[birdIndex];
+    auto& bird = birdFlocks[birdIndex];
+
+    // Calculate rotation from velocity direction
+    bird.rotation = atan2(bird.velocity.y, bird.velocity.x);
 
     // Calculate particles per bird
     int particlesPerBird = particles.size() / NUM_BIRDS;
     int startIdx = birdIndex * particlesPerBird;
     int endIdx = (birdIndex == NUM_BIRDS - 1) ? particles.size() : (birdIndex + 1) * particlesPerBird;
 
-    // V-shaped bird silhouette (simplified)
-    int count = 0;
+    int imgW = birdSilhouette.getWidth();
+    int imgH = birdSilhouette.getHeight();
+
+    // Sample the bird image to create particle positions
+    vector<glm::vec2> whitePixels;
+
+    // Find all white (bird) pixels
+    for (int y = 0; y < imgH; y++) {
+        for (int x = 0; x < imgW; x++) {
+            ofColor c = birdSilhouette.getColor(x, y);
+            if (c.r > 128) {  // White or light gray pixels
+                whitePixels.push_back(glm::vec2(x, y));
+            }
+        }
+    }
+
+    if (whitePixels.empty()) {
+        ofLog() << "Warning: No white pixels found in bird silhouette";
+        return;
+    }
+
+    // Wing flapping: modify Y positions based on wing phase
+    float wingFlap = sin(bird.wingPhase) * 10.0;
+
+    // Assign particles to sampled positions
     for (int i = startIdx; i < endIdx; i++) {
         auto& p = particles[i];
         p.birdGroup = birdIndex;
 
-        // Create V-shape using parametric equations
-        float t = (float)(i - startIdx) / (endIdx - startIdx);  // 0 to 1
+        // Pick a random pixel from the white pixels
+        int pixelIdx = (i - startIdx) % whitePixels.size();
+        glm::vec2 pixelPos = whitePixels[pixelIdx];
 
-        // Wing flapping amplitude
-        float wingFlap = sin(bird.wingPhase) * 15.0;
+        // Center the bird image
+        float localX = (pixelPos.x - imgW / 2.0) * bird.size;
+        float localY = (pixelPos.y - imgH / 2.0) * bird.size;
 
-        float x, y;
+        // Apply wing flapping (more flap at wing tips)
+        float distFromCenter = abs(localX) / (imgW / 2.0);
+        localY += wingFlap * distFromCenter;
 
-        if (t < 0.05) {
-            // Head (small cluster)
-            x = 0;
-            y = 0;
-        } else if (t < 0.5) {
-            // Left wing
-            float wingT = (t - 0.05) / 0.45;
-            x = -wingT * bird.size;
-            y = wingT * bird.size * 0.7 + wingFlap * wingT;
-        } else {
-            // Right wing
-            float wingT = (t - 0.5) / 0.5;
-            x = wingT * bird.size;
-            y = wingT * bird.size * 0.7 + wingFlap * wingT;
-        }
-
-        // Add body thickness
-        float bodyThickness = ofRandom(-5, 5);
-        x += bodyThickness;
+        // Rotate based on flight direction
+        float cosR = cos(bird.rotation);
+        float sinR = sin(bird.rotation);
+        float rotatedX = localX * cosR - localY * sinR;
+        float rotatedY = localX * sinR + localY * cosR;
 
         // Apply to particle's bird position
-        p.birdPos = bird.center + glm::vec3(x, y, 0);
-
-        // Color variation (slightly lighter for sky creatures)
-        float brightness = ofMap(t, 0, 1, 0.8, 1.2);
-        p.color.r = ofClamp(p.color.r * brightness, 0, 1);
-        p.color.g = ofClamp(p.color.g * brightness, 0, 1);
-        p.color.b = ofClamp(p.color.b * brightness, 0, 1);
-
-        count++;
+        p.birdPos = bird.center + glm::vec3(rotatedX, rotatedY, 0);
     }
 }
 

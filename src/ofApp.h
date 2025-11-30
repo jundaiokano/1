@@ -90,8 +90,10 @@ private:
         glm::vec3 velocity;
         float wingPhase;
         float size;
+        float rotation;  // Bird rotation angle
     };
     vector<BirdFlock> birdFlocks;
+    ofImage birdSilhouette;  // Bird silhouette image
 
     // Performance Settings
     static const int MAX_PARTICLES = 30000;
@@ -118,6 +120,7 @@ private:
     // Bird formation
     void initBirdFormations();
     void generateBirdShape(int birdIndex);
+    void createBirdSilhouette();
 
     // Audio analysis
     void analyzeAudio();
